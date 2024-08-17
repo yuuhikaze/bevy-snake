@@ -25,7 +25,7 @@ fn spawn_snake(mut commands: Commands) {
                 ..default()
             },
             transform: Transform {
-                scale: Vec3::new(10.0, 10.0, 10.0),
+                scale: Vec3::new(10., 10., 10.),
                 ..default()
             },
             ..default()
@@ -33,8 +33,22 @@ fn spawn_snake(mut commands: Commands) {
         .insert(SnakeHead);
 }
 
-fn snake_movement(mut head_positions: Query<(&SnakeHead, &mut Transform)>) {
-    head_positions.iter_mut().for_each(|(_, mut t)| {
-        t.translation.y += 2.0;
+fn snake_movement(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut head_positions: Query<&mut Transform, With<SnakeHead>>,
+) {
+    head_positions.iter_mut().for_each(|mut transform| {
+        if keyboard_input.pressed(KeyCode::ArrowUp) || keyboard_input.pressed(KeyCode::KeyW) {
+            transform.translation.y += 2.;
+        }
+        if keyboard_input.pressed(KeyCode::ArrowDown) || keyboard_input.pressed(KeyCode::KeyS) {
+            transform.translation.y -= 2.;
+        }
+        if keyboard_input.pressed(KeyCode::ArrowRight) || keyboard_input.pressed(KeyCode::KeyD) {
+            transform.translation.x += 2.;
+        }
+        if keyboard_input.pressed(KeyCode::ArrowLeft) || keyboard_input.pressed(KeyCode::KeyA) {
+            transform.translation.x -= 2.;
+        }
     });
 }
