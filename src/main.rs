@@ -4,9 +4,22 @@ use bevy::{prelude::*, time::common_conditions::on_timer, window::PrimaryWindow}
 use rand::prelude::random;
 
 const SNAKE_HEAD_COLOR: Color = Color::srgb(0.7, 0.7, 0.7);
+const SNAKE_SEGMENT_COLOR: Color = Color::srgb(0.3, 0.3, 0.3);
 const FOOD_COLOR: Color = Color::srgb(1., 0., 1.);
 const ARENA_WIDTH: u32 = 10;
 const ARENA_HEIGHT: u32 = 10;
+
+#[derive(Resource, Default)]
+struct LastTailPosition(Option<Position>);
+
+#[derive(Event)]
+struct GrowthEvent;
+
+#[derive(Component)]
+struct SnakeSegment;
+
+#[derive(Resource, Default)]
+struct SnakeSegments(Vec<Entity>);
 
 #[derive(PartialEq, Copy, Clone)]
 enum Direction {
@@ -83,6 +96,8 @@ fn main() {
             ..default()
         }))
         .insert_resource(ClearColor(Color::srgb(0.04, 0.04, 0.04)))
+        .insert_resource(SnakeSegments::default())
+        .insert_resource(LastTailPosition::default())
         .add_systems(Startup, (setup_camera, spawn_snake).chain())
         .add_systems(PostUpdate, (position_translation, size_scaling))
         .add_systems(
@@ -92,7 +107,15 @@ fn main() {
                 food_spawner.run_if(on_timer(Duration::from_secs_f32(1.))),
             ),
         )
-        .add_systems(Update, snake_movement_input.before(snake_movement))
+        .add_systems(
+            Update,
+            (
+                snake_movement_input.before(snake_movement),
+                snake_eating.after(snake_movement),
+                snake_growth.after(snake_eating),
+            ),
+        )
+        .add_event::<GrowthEvent>()
         .run();
 }
 
@@ -100,24 +123,29 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
 }
 
-fn spawn_snake(mut commands: Commands) {
-    commands
-        .spawn(SpriteBundle {
-            sprite: Sprite {
-                color: SNAKE_HEAD_COLOR,
+fn spawn_snake(mut commands: Commands, mut segments: ResMut<SnakeSegments>) {
+    *segments = SnakeSegments(vec![
+        commands
+            .spawn(SpriteBundle {
+                sprite: Sprite {
+                    color: SNAKE_HEAD_COLOR,
+                    ..default()
+                },
+                transform: Transform {
+                    scale: Vec3::new(10., 10., 10.),
+                    ..default()
+                },
                 ..default()
-            },
-            transform: Transform {
-                scale: Vec3::new(10., 10., 10.),
-                ..default()
-            },
-            ..default()
-        })
-        .insert(SnakeHead {
-            direction: Direction::Up,
-        })
-        .insert(Position { x: 3, y: 3 })
-        .insert(Size::square(0.8));
+            })
+            .insert(SnakeHead {
+                direction: Direction::Up,
+            })
+            .insert(SnakeSegment)
+            .insert(Position { x: 3, y: 3 })
+            .insert(Size::square(0.8))
+            .id(),
+        spawn_segment(commands, Position { x: 3, y: 2 }),
+    ])
 }
 
 fn size_scaling(
@@ -182,13 +210,73 @@ fn snake_movement_input(
     }
 }
 
-fn snake_movement(mut head_positions: Query<(&mut SnakeHead, &mut Position)>) {
-    if let Some((head, mut position)) = head_positions.iter_mut().next() {
+fn snake_movement(
+    segments: ResMut<SnakeSegments>,
+    mut heads: Query<(Entity, &SnakeHead)>,
+    mut positions: Query<&mut Position>,
+    mut last_tail_position: ResMut<LastTailPosition>,
+) {
+    if let Some((head_entity, head)) = heads.iter_mut().next() {
+        let segment_positions = segments
+            .0
+            .iter()
+            .map(|e| *positions.get_mut(*e).unwrap())
+            .collect::<Vec<Position>>();
+        *last_tail_position = LastTailPosition(Some(*segment_positions.last().unwrap()));
+        let mut head_position = positions.get_mut(head_entity).unwrap();
         match head.direction {
-            Direction::Up => position.y += 1,
-            Direction::Down => position.y -= 1,
-            Direction::Right => position.x += 1,
-            Direction::Left => position.x -= 1,
+            Direction::Up => head_position.y += 1,
+            Direction::Down => head_position.y -= 1,
+            Direction::Right => head_position.x += 1,
+            Direction::Left => head_position.x -= 1,
         }
+        segment_positions
+            .iter()
+            .zip(segments.0.iter().skip(1))
+            .for_each(|(position, segment)| *positions.get_mut(*segment).unwrap() = *position);
+    }
+}
+
+fn spawn_segment(mut commands: Commands, position: Position) -> Entity {
+    commands
+        .spawn(SpriteBundle {
+            sprite: Sprite {
+                color: SNAKE_SEGMENT_COLOR,
+                ..default()
+            },
+            ..default()
+        })
+        .insert(SnakeSegment)
+        .insert(position)
+        .insert(Size::square(0.65))
+        .id()
+}
+
+fn snake_eating(
+    mut commands: Commands,
+    mut growth_writer: EventWriter<GrowthEvent>,
+    food_positions: Query<(Entity, &Position), With<Food>>,
+    head_positions: Query<&Position, With<SnakeHead>>,
+) {
+    head_positions.iter().for_each(|head_position| {
+        food_positions.iter().for_each(|(entity, food_position)| {
+            if food_position == head_position {
+                commands.entity(entity).despawn();
+                growth_writer.send(GrowthEvent);
+            }
+        })
+    });
+}
+
+fn snake_growth(
+    commands: Commands,
+    last_tail_position: Res<LastTailPosition>,
+    mut segments: ResMut<SnakeSegments>,
+    mut growth_reader: EventReader<GrowthEvent>,
+) {
+    if growth_reader.read().next().is_some() {
+        segments
+            .0
+            .push(spawn_segment(commands, last_tail_position.0.unwrap()));
     }
 }
