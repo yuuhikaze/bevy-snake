@@ -13,6 +13,9 @@ const ARENA_HEIGHT: u32 = 10;
 struct LastTailPosition(Option<Position>);
 
 #[derive(Event)]
+struct SpawnEvent;
+
+#[derive(Event)]
 struct GrowthEvent;
 
 #[derive(Component)]
@@ -43,21 +46,27 @@ impl Direction {
 #[derive(Component)]
 struct Food;
 
-fn food_spawner(mut commands: Commands) {
-    commands
-        .spawn(SpriteBundle {
-            sprite: Sprite {
-                color: FOOD_COLOR,
+fn spawn_food(
+    mut growth_reader: EventReader<GrowthEvent>,
+    mut spawn_reader: EventReader<SpawnEvent>,
+    mut commands: Commands,
+) {
+    if spawn_reader.read().next().is_some() || growth_reader.read().next().is_some() {
+        commands
+            .spawn(SpriteBundle {
+                sprite: Sprite {
+                    color: FOOD_COLOR,
+                    ..default()
+                },
                 ..default()
-            },
-            ..default()
-        })
-        .insert(Food)
-        .insert(Position {
-            x: (random::<f32>() * ARENA_WIDTH as f32) as i32,
-            y: (random::<f32>() * ARENA_HEIGHT as f32) as i32,
-        })
-        .insert(Size::square(0.8));
+            })
+            .insert(Food)
+            .insert(Position {
+                x: (random::<f32>() * ARENA_WIDTH as f32) as i32,
+                y: (random::<f32>() * ARENA_HEIGHT as f32) as i32,
+            })
+            .insert(Size::square(0.8));
+    }
 }
 
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
@@ -98,14 +107,14 @@ fn main() {
         .insert_resource(ClearColor(Color::srgb(0.04, 0.04, 0.04)))
         .insert_resource(SnakeSegments::default())
         .insert_resource(LastTailPosition::default())
-        .add_systems(Startup, (setup_camera, spawn_snake).chain())
+        .add_systems(
+            Startup,
+            (setup_camera, emit_spawn_signal, spawn_snake).chain(),
+        )
         .add_systems(PostUpdate, (position_translation, size_scaling))
         .add_systems(
             FixedUpdate,
-            (
-                snake_movement.run_if(on_timer(Duration::from_secs_f32(0.150))),
-                food_spawner.run_if(on_timer(Duration::from_secs_f32(1.))),
-            ),
+            (snake_movement.run_if(on_timer(Duration::from_secs_f32(0.090))),),
         )
         .add_systems(
             Update,
@@ -113,9 +122,11 @@ fn main() {
                 snake_movement_input.before(snake_movement),
                 snake_eating.after(snake_movement),
                 snake_growth.after(snake_eating),
+                spawn_food,
             ),
         )
         .add_event::<GrowthEvent>()
+        .add_event::<SpawnEvent>()
         .run();
 }
 
@@ -123,29 +134,39 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
 }
 
-fn spawn_snake(mut commands: Commands, mut segments: ResMut<SnakeSegments>) {
-    *segments = SnakeSegments(vec![
-        commands
-            .spawn(SpriteBundle {
-                sprite: Sprite {
-                    color: SNAKE_HEAD_COLOR,
+fn emit_spawn_signal(mut growth_writer: EventWriter<SpawnEvent>) {
+    growth_writer.send(SpawnEvent);
+}
+
+fn spawn_snake(
+    mut spawn_reader: EventReader<SpawnEvent>,
+    mut commands: Commands,
+    mut segments: ResMut<SnakeSegments>,
+) {
+    if spawn_reader.read().next().is_some() {
+        *segments = SnakeSegments(vec![
+            commands
+                .spawn(SpriteBundle {
+                    sprite: Sprite {
+                        color: SNAKE_HEAD_COLOR,
+                        ..default()
+                    },
+                    transform: Transform {
+                        scale: Vec3::new(10., 10., 10.),
+                        ..default()
+                    },
                     ..default()
-                },
-                transform: Transform {
-                    scale: Vec3::new(10., 10., 10.),
-                    ..default()
-                },
-                ..default()
-            })
-            .insert(SnakeHead {
-                direction: Direction::Up,
-            })
-            .insert(SnakeSegment)
-            .insert(Position { x: 3, y: 3 })
-            .insert(Size::square(0.8))
-            .id(),
-        spawn_segment(commands, Position { x: 3, y: 2 }),
-    ])
+                })
+                .insert(SnakeHead {
+                    direction: Direction::Up,
+                })
+                .insert(SnakeSegment)
+                .insert(Position { x: 3, y: 3 })
+                .insert(Size::square(0.8))
+                .id(),
+            spawn_segment(commands, Position { x: 3, y: 2 }),
+        ])
+    }
 }
 
 fn size_scaling(
