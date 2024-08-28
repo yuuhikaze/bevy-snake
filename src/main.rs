@@ -13,6 +13,9 @@ const ARENA_HEIGHT: u32 = 10;
 struct LastTailPosition(Option<Position>);
 
 #[derive(Event)]
+struct GameOverEvent;
+
+#[derive(Event)]
 struct SpawnEvent;
 
 #[derive(Event)]
@@ -123,10 +126,12 @@ fn main() {
                 snake_eating.after(snake_movement),
                 snake_growth.after(snake_eating),
                 spawn_food,
+                game_over.after(snake_movement)
             ),
         )
         .add_event::<GrowthEvent>()
         .add_event::<SpawnEvent>()
+        .add_event::<GameOverEvent>()
         .run();
 }
 
@@ -236,6 +241,7 @@ fn snake_movement(
     mut heads: Query<(Entity, &SnakeHead)>,
     mut positions: Query<&mut Position>,
     mut last_tail_position: ResMut<LastTailPosition>,
+    mut game_over_writer: EventWriter<GameOverEvent>,
 ) {
     if let Some((head_entity, head)) = heads.iter_mut().next() {
         let segment_positions = segments
@@ -250,6 +256,16 @@ fn snake_movement(
             Direction::Down => head_position.y -= 1,
             Direction::Right => head_position.x += 1,
             Direction::Left => head_position.x -= 1,
+        }
+        if head_position.x < 0
+            || head_position.y < 0
+            || head_position.x as u32 >= ARENA_WIDTH
+            || head_position.y as u32 >= ARENA_HEIGHT
+        {
+            game_over_writer.send(GameOverEvent);
+        }
+        if segment_positions.contains(&head_position) {
+            game_over_writer.send(GameOverEvent);
         }
         segment_positions
             .iter()
@@ -299,5 +315,19 @@ fn snake_growth(
         segments
             .0
             .push(spawn_segment(commands, last_tail_position.0.unwrap()));
+    }
+}
+
+fn game_over(
+    mut commands: Commands,
+    mut game_over_reader: EventReader<GameOverEvent>,
+    food: Query<Entity, With<Food>>,
+    segments: Query<Entity, With<SnakeSegment>>,
+) {
+    if game_over_reader.read().next().is_some() {
+        for entity in food.iter().chain(segments.iter()) {
+            commands.entity(entity).despawn();
+        }
+        // TODO: show game over screen
     }
 }
